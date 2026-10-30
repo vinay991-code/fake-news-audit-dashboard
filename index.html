@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fake-News Accuracy Audit</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout concept: a lab-notebook board. Sticky tab rail, one panel at a time, summary first, every number tagged with the file it came from.
+   Colour: slate neutrals tinted toward teal; teal = trustworthy signal, amber = caution, red = below chance / artefact. Type: Plex Sans + Plex Mono for figures. */
+:root {
+  --bg: #F3F6F7; --surface: #FFFFFF; --surface2: #EAF0F2; --ink: #12242B; --muted: #566A73; --line: #D3DDE1;
+  --accent: #0B7F86; --accent-weak: #D6EEF0; --warn: #A86A00; --warn-weak: #FBEFD6; --bad: #B23A2E; --bad-weak: #F7E1DD; --good: #25774A; --good-weak: #DCF0E4;
+  --s1: #0B7F86; --s2: #A86A00; --s3: #6C5BA7; --s4: #12242B;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --radius: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0B161B; --surface: #12232A; --surface2: #183039; --ink: #E5EEF1; --muted: #9AB0B8; --line: #26404A;
+    --accent: #43C2C9; --accent-weak: #123C42; --warn: #E5A93C; --warn-weak: #3A2D10; --bad: #F08376; --bad-weak: #46211D; --good: #5CC98B; --good-weak: #14392A;
+    --s1: #43C2C9; --s2: #E5A93C; --s3: #A99BE0; --s4: #E5EEF1; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0B161B; --surface: #12232A; --surface2: #183039; --ink: #E5EEF1; --muted: #9AB0B8; --line: #26404A;
+  --accent: #43C2C9; --accent-weak: #123C42; --warn: #E5A93C; --warn-weak: #3A2D10; --bad: #F08376; --bad-weak: #46211D; --good: #5CC98B; --good-weak: #14392A;
+  --s1: #43C2C9; --s2: #E5A93C; --s3: #A99BE0; --s4: #E5EEF1; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.5; margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 0 48px; }
+.wrap { max-width: 1180px; margin: 0 auto; }
+h1, h2, h3 { text-wrap: balance; line-height: 1.2; margin: 0; font-weight: 600; }
+h1 { font-size: clamp(1.45rem, 3vw, 2rem); }
+h2 { font-size: 1.2rem; margin-bottom: 4px; }
+h3 { font-size: 1rem; }
+p { margin: 0; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 22px 0 14px; }
+.top .sub { color: var(--muted); font-size: .9rem; margin-top: 4px; max-width: 70ch; }
+.badges { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chip { font-family: var(--mono); font-size: .74rem; padding: 3px 8px; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); background: var(--surface); white-space: nowrap; }
+.chip.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-weak); }
+button.tog, .tabs button { font: inherit; cursor: pointer; }
+button.tog { background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); padding: 5px 10px; font-size: .82rem; }
+button.tog[aria-pressed="true"] { background: var(--accent); color: var(--surface); border-color: var(--accent); }
+.tabs { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); display: flex; gap: 2px; overflow-x: auto; border-bottom: 1px solid var(--line); padding-top: 2px; }
+.tabs button { background: none; border: 0; border-bottom: 3px solid transparent; color: var(--muted); padding: 10px 14px; font-size: .92rem; white-space: nowrap; }
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+.tabs button:focus-visible, button.tog:focus-visible, a:focus-visible, .cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); background: var(--bg); z-index: 10; }
+main { padding-top: 22px; }
+.panel[hidden] { display: none !important; }
+.grid { display: grid; gap: 14px; }
+.g4 { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.g2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; min-width: 0; }
+.card.tint { background: var(--surface2); }
+.kpi .label { font-size: .78rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.kpi .num { font-family: var(--mono); font-size: 1.7rem; font-weight: 500; margin: 6px 0 4px; font-variant-numeric: tabular-nums; }
+.kpi.good .num { color: var(--good); } .kpi.warn .num { color: var(--warn); } .kpi.bad .num { color: var(--bad); }
+.kpi .note { font-size: .86rem; color: var(--muted); }
+.src { display: block; margin-top: 10px; font-family: var(--mono); font-size: .7rem; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 6px; overflow-wrap: anywhere; }
+.verdict { font-size: clamp(1.05rem, 2vw, 1.3rem); max-width: 62ch; margin-bottom: 18px; }
+.callout { border-left: 3px solid var(--warn); background: var(--warn-weak); padding: 10px 14px; border-radius: 0 var(--radius) var(--radius) 0; font-size: .92rem; }
+.callout.bad { border-left-color: var(--bad); background: var(--bad-weak); } .callout.good { border-left-color: var(--good); background: var(--good-weak); }
+ul.clean { margin: 8px 0 0; padding-left: 18px; } ul.clean li { margin: 4px 0; }
+.scroll { overflow-x: auto; max-width: 100%; }
+table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); font-size: .76rem; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+td.n, th.n { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+tr.total td { font-weight: 600; border-top: 2px solid var(--line); }
+.pill { font-family: var(--mono); font-size: .72rem; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); white-space: nowrap; }
+.pill.good { color: var(--good); border-color: var(--good); background: var(--good-weak); } .pill.bad { color: var(--bad); border-color: var(--bad); background: var(--bad-weak); }
+.pill.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-weak); } .pill.mute { color: var(--muted); }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 14px; }
+.controls .lab { font-size: .8rem; color: var(--muted); margin-right: 2px; }
+svg text { font-family: var(--mono); fill: var(--muted); font-size: 11px; }
+svg .ink { fill: var(--ink); } svg .grid { stroke: var(--line); stroke-width: 1; } svg .axis { stroke: var(--muted); stroke-width: 1; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .8rem; color: var(--muted); margin-top: 8px; }
+.legend i { display: inline-block; width: 11px; height: 11px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.heat { display: grid; gap: 4px; min-width: 520px; }
+.heat .hd { font-size: .76rem; color: var(--muted); text-align: center; align-self: end; padding-bottom: 2px; }
+.heat .rl { font-size: .82rem; color: var(--ink); align-self: center; padding-right: 6px; text-align: right; }
+.cell { border: 0; border-radius: 4px; padding: 14px 4px; font-family: var(--mono); font-size: .98rem; color: var(--ink); cursor: pointer; text-align: center; }
+.cell.diag { box-shadow: inset 0 0 0 2px var(--ink); }
+.cell[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.detail { font-family: var(--mono); font-size: .86rem; min-height: 3.4em; }
+.tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+.tag { font-size: .88rem; padding: 2px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--line); }
+.tag.f { border-color: var(--bad); } .tag.r { border-color: var(--accent); }
+.bar { display: flex; height: 12px; border-radius: 3px; overflow: hidden; background: var(--surface2); min-width: 120px; }
+.bar i { display: block; height: 100%; } .bar i.f { background: var(--bad); } .bar i.r { background: var(--accent); }
+textarea { width: 100%; min-height: 120px; font: inherit; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink); }
+button.go { font: inherit; background: var(--accent); color: var(--surface); border: 0; border-radius: var(--radius); padding: 8px 16px; cursor: pointer; font-weight: 600; }
+button.go:disabled { opacity: .5; cursor: not-allowed; }
+.steps { counter-reset: s; display: grid; gap: 8px; padding: 0; margin: 10px 0 0; list-style: none; }
+.steps li { display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: start; background: var(--surface2); border-radius: var(--radius); padding: 10px 12px; }
+.steps li::before { counter-increment: s; content: counter(s); font-family: var(--mono); background: var(--accent); color: var(--surface); border-radius: 50%; width: 26px; height: 26px; display: grid; place-items: center; font-size: .82rem; }
+pre.cmd { background: var(--surface2); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; overflow-x: auto; font-family: var(--mono); font-size: .8rem; margin: 8px 0 0; }
+footer { margin-top: 36px; color: var(--muted); font-size: .8rem; border-top: 1px solid var(--line); padding-top: 12px; }
+@media (max-width: 560px) { .tabs button { padding: 9px 10px; font-size: .86rem; } .kpi .num { font-size: 1.45rem; } }
+@media (prefers-reduced-motion: no-preference) { .panel { animation: fade .18s ease-out; } @keyframes fade { from { opacity: .4; } to { opacity: 1; } } }
+</style>
+
+</head><body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Fake-News Accuracy Audit</h1>
+      <p class="sub">Does a multilingual fake-news detector detect fake news, or the source it was trained on? Hindi, Telugu, Tamil, English and 13 other languages; XLM-RoBERTa and RemBERT.</p>
+    </div>
+    <div class="badges">
+      <span class="chip" id="chipRuns"></span>
+      <span class="chip" id="chipDate"></span>
+      <button class="tog" id="themeBtn" type="button" aria-pressed="false">Theme: system</button>
+    </div>
+  </header>
+  <nav class="tabs" role="tablist" aria-label="Sections" id="tabs"></nav>
+  <main id="main">
+    <section class="panel" id="p-overview" hidden></section>
+    <section class="panel" id="p-data" hidden></section>
+    <section class="panel" id="p-audit" hidden></section>
+    <section class="panel" id="p-accuracy" hidden></section>
+    <section class="panel" id="p-transfer" hidden></section>
+    <section class="panel" id="p-models" hidden></section>
+    <section class="panel" id="p-controls" hidden></section>
+    <section class="panel" id="p-demo" hidden></section>
+    <section class="panel" id="p-method" hidden></section>
+  </main>
+  <footer>Every figure on this page is read from the result files named under it; nothing is typed by hand. Statements marked "hypothesis" were not tested. Built <span id="built"></span>.</footer>
+</div>
+<script>
+const D = {"meta": {"generated": "2026-10-30", "xlmr_runs": 25, "xlmr_expected": 25, "lora_runs": 24, "lora_expected": 24, "live": false}, "funnel": [{"corpus": "Hindi", "raw": 20593, "after_dedup": 15100, "dup_pct": 26.7, "final": 15019, "fake": 7459, "real": 7560, "mean_words": 675, "total": false}, {"corpus": "Telugu", "raw": 20001, "after_dedup": 11459, "dup_pct": 42.7, "final": 11370, "fake": 6582, "real": 4788, "mean_words": 311, "total": false}, {"corpus": "English (ISOT)", "raw": 44898, "after_dedup": 38639, "dup_pct": 13.9, "final": 36820, "fake": 16465, "real": 20355, "mean_words": 419, "total": false}, {"corpus": "Polyglot (18 languages)", "raw": 10150, "after_dedup": 9055, "dup_pct": 10.8, "final": 8479, "fake": 4735, "real": 3744, "mean_words": 675, "total": false}, {"corpus": "Tamil (headlines)", "raw": 14564, "after_dedup": 13992, "dup_pct": 3.9, "final": 13818, "fake": 2873, "real": 10945, "mean_words": 11, "total": false}, {"corpus": "TOTAL", "raw": 110206, "after_dedup": 88245, "dup_pct": 19.9, "final": 85506, "fake": 38114, "real": 47392, "mean_words": null, "total": true}], "audit": {"Polyglot:de": {"n": 438, "fmt": 0.765, "head": 0.865, "tail": 0.9816666666666667, "full": 0.98}, "ISOT:en": {"n": 12000, "fmt": 0.815, "head": 0.9963333333333333, "tail": 0.9596666666666667, "full": 0.9996666666666667}, "Polyglot:es": {"n": 767, "fmt": 0.7888888888888889, "head": 0.7972222222222223, "tail": 0.9680555555555556, "full": 0.9888888888888889}, "Hindi_zip:hi": {"n": 12000, "fmt": 0.986, "head": 0.9666666666666667, "tail": 0.9550000000000001, "full": 0.9916666666666667}, "Polyglot:hu": {"n": 478, "fmt": 0.920979020979021, "head": 0.8741258741258742, "tail": 0.9818181818181818, "full": 0.9727272727272727}, "Polyglot:it": {"n": 375, "fmt": 0.8031818181818182, "head": 0.8063636363636364, "tail": 0.9172727272727272, "full": 0.9786363636363636}, "Polyglot:ru": {"n": 2590, "fmt": 0.6008026755852843, "head": 0.56, "tail": 0.8300000000000001, "full": 0.75}, "Tamil_gh:ta": {"n": 8892, "fmt": 0.845643153526971, "head": 0.9577053941908713, "tail": 0.9572724757952974, "full": 0.9597053941908713}, "Telugu_zip:te": {"n": 10795, "fmt": 0.9987489574645538, "head": 0.9924142340839588, "tail": 0.9856611064776202, "full": 0.9986666666666666}}, "tfidf": {"en": {"v0": {"mean": 0.9988888888888888, "std": 0.0003142696805273199}, "v1": {"mean": 0.9946666666666667, "std": 0.002372684056006988}, "v2": {"mean": 0.9826666666666667, "std": 0.0005443310539518027}}, "hi": {"v0": {"mean": 0.9922222222222222, "std": 0.0029979416807182193}, "v1": {"mean": 0.9924444444444444, "std": 0.0032810717911629823}, "v2": {"mean": 0.9793333333333333, "std": 0.00381031737766271}}, "te": {"v0": {"mean": 0.9984444444444445, "std": 0.0011331154474650764}, "v1": {"mean": 0.9984444444444445, "std": 0.0011331154474650764}, "v2": {"mean": 0.9973333333333333, "std": 0.0018856180831641283}}, "ta": {"v0": {"mean": 0.9591558883594281, "std": 0.0020040301489284785}, "v1": {"mean": 0.9591558883594281, "std": 0.0020040301489284785}, "v2": {"mean": 0.9591558883594281, "std": 0.0020040301489284785}}}, "cues": {"en": {"fake": ["s", "t", "us", "obama", "this", "re", "that", "even", "is", "these", "gop", "american", "you", "like", "fact", "didn", "said.the", "just", "americans", "black", "they", "what", "isis", "only", "j", "gun", "rep", "fbi", "their", "clinton"], "real": ["said", "trump’s", "reuters", "u.s", "told", "it’s", "reporters", "clinton’s", "don’t", "i’m", "minister", "comment", "obama’s", "on", "capital", "statement", "we’re", "percent", "parliament", "election", "china", "spokesman", "trade", "republican", "earlier", "party’s", "government", "spokeswoman", "ministry", "in"], "year_fake": 0.19933333333333333, "year_real": 0.25833333333333336}, "hi": {"fake": ["वायरल", "वीडियो", "पोस्ट", "बूम", "तस्वीर", "दावा", "स्रोत", "कैप्शन", "मीडिया", "फर्जी", "यहां", "ट्वीट", "दावे", "फेसबुक", "समाचार", "क्या", "गया", "छवि", "किया", "सच", "बीबीसी", "गलत", "सोशल", "हमने", "2018", "जा", "मैसेज", "2019", "2020", "इमेज"], "real": ["कहा", "कॉन्ग्रेस", "वहीं", "बता", "प्रतिशत", "दें", "काफी", "मुताबिक", "टीम", "उन्होंने", "बयान", "ज्यादा", "चाहिए", "पाने", "मणिपुर", "लेकर", "तो", "होती", "जानिए", "भी", "ही", "सोमवार", "बेहद", "हमारा", "दौरान", "शर्मा", "ने", "केंद्रीय", "दिप्रिंट", "इसके"], "year_fake": 0.494, "year_real": 0.017333333333333333}, "te": {"fake": ["ఈ", "మరియు", "యొక్క", "మేము", "వైరల్", "నుండి", "న", "వీడియో", "ఇక్కడ", "అతను", "ఇది", "వీడియోను", "ఆ", "అని", "చిత్రం", "నకిలీ", "బూమ్", "నిజం", "మీడియా", "ప్రకారం", "పోస్ట్", "ఇమేజ్", "తరువాత", "ట్వీట్", "కాని", "సోషల్", "వార్తా", "చిత్రాన్ని", "న్యూస్", "ఫ్యాక్ట్"], "real": ["నుంచి", "వల్ల", "ఉంటుంది", "ఉండే", "ఉంటాయి", "తెలిపారు", "కరోనా", "దీంతో", "ఎక్కువగా", "మాత్రం", "బాగా", "అలా", "నిపుణులు", "ఇక", "ఏళ్ల", "శాతం", "పాటు", "సమస్యలు", "వచ్చే", "గా", "అంటున్నారు", "పరిశోధకులు", "అయితే", "అవకాశం", "మంచి", "అధిక", "గుండె", "వ్యాక్సిన్", "బరువు", "సహాయపడుతుంది"], "year_fake": 0.559, "year_real": 0.0}, "ta": {"fake": ["உண்மை", "கூறுகிறார்", "என்று", "மற்றும்", "டிரம்ப்", "உண்மையா", "கூறுகிறது", "ஒபாமா", "என்கிறார்", "உள்ளது", "மில்லியன்", "அவரது", "ஒபாமாவின்", "வரி", "பொய்", "காட்டுகிறது", "வெள்ளை", "ஜனநாயகக்", "ஜனாதிபதி", "ஹிலாரி", "வைரஸ்", "போலி", "சட்டத்தை", "உண்மையில்", "பில்", "ஜார்ஜ்", "அல்லது", "இல்", "விஸ்கான்சின்", "கிளிண்டன்"], "real": ["அமைச்சர்", "பாதிப்பு", "மாணவி", "ஸ்டாலின்", "தெரியுமா", "தமிழகத்தில்", "2022", "நடிகை", "சென்னை", "வழக்கு", "வந்த", "அகிலேஷ்", "கோப்பை", "கோடி", "உக்ரைன்", "பஞ்சாப்", "திமுக", "பரபர", "அறிவிப்பு", "திடீர்", "இன்று", "ஏன்", "நாளை", "தகவல்", "ஹிஜாப்", "ஆளுநர்", "கேள்வி", "சிதம்பரம்", "கண்டனம்", "அண்ணாமலை"], "year_fake": 0.03167420814479638, "year_real": 0.018333333333333333}}, "controls": {"en": [0.9826666666666667, 0.9819999999999999, 0.9817777777777777, 0.9768888888888889], "hi": [0.9793333333333333, 0.9775555555555555, 0.9771111111111112, 0.9806666666666667], "te": [0.9973333333333333, 0.9975555555555555, 0.9973333333333333, 0.9988888888888888], "ta": [0.9591558883594281, 0.9589289766280916, 0.9575675062400726, 0.9443498012492902]}, "ablation": {"en": {"0": 0.9595555555555556, "10": 0.9319999999999999, "30": 0.9275555555555556, "100": 0.9135555555555556, "300": 0.8937777777777778, "1000": 0.867111111111111, "3000": 0.8248888888888889}, "hi": {"0": 0.9671111111111111, "10": 0.9682222222222222, "30": 0.9664444444444444, "100": 0.9595555555555556, "300": 0.9455555555555555, "1000": 0.9235555555555556, "3000": 0.8586666666666667}, "te": {"0": 0.9966666666666666, "10": 0.996, "30": 0.9948888888888888, "100": 0.9917777777777778, "300": 0.9859999999999999, "1000": 0.9782222222222222, "3000": 0.9651111111111111, "10000": 0.8897777777777778}, "ta": {"0": 0.9130928068981167, "10": 0.8917631041524846, "30": 0.8829135466303608, "100": 0.8584070796460178, "300": 0.8125709099160426, "1000": 0.6825504878602223}}, "ablation_ks": ["0", "10", "30", "100", "300", "1000", "3000", "10000"], "fmt": {"all12": {"en->en": 0.8235, "en->hi": 0.3978333333333333, "en->te": 0.6256038647342995, "en->ta": 0.5875132275132275, "en->poly": 0.5956532123238596, "hi->en": 0.5, "hi->hi": 0.9853333333333333, "hi->te": 0.9470324361628709, "hi->ta": 0.36507936507936506, "hi->poly": 0.4045856221638405, "te->en": 0.5, "te->hi": 0.8818333333333334, "te->te": 0.9984472049689441, "te->ta": 0.36507936507936506, "te->poly": 0.44367486665074435, "ta->en": 0.5, "ta->hi": 0.5, "ta->te": 0.5175983436853002, "ta->ta": 0.8728042328042328, "ta->poly": 0.5529018390255553}, "scale_free": {"en->en": 0.7971666666666666, "en->hi": 0.4888333333333333, "en->te": 0.6494133885438232, "en->ta": 0.5699470899470899, "en->poly": 0.5681474404904068, "hi->en": 0.49616666666666664, "hi->hi": 0.9396666666666667, "hi->te": 0.8959627329192547, "hi->ta": 0.6406349206349207, "hi->poly": 0.48523206751054854, "te->en": 0.49733333333333335, "te->hi": 0.9016666666666667, "te->te": 0.9920634920634921, "te->ta": 0.5352380952380952, "te->poly": 0.5086776530531009, "ta->en": 0.4948333333333333, "ta->hi": 0.5378333333333333, "ta->te": 0.6368184955141477, "ta->ta": 0.8376719576719577, "ta->poly": 0.49852718732584983}}, "xlmr": {"v0": {"en": {"en": {"acc": 0.9981666666666668, "sd": 0.0005773502691896, "auc": 0.9996336666666666, "seeds": 3}, "hi": {"acc": 0.5285000000000001, "sd": 0.0247133567125147, "auc": 0.6852848333333333, "seeds": 3}, "poly_ood": {"acc": 0.5297149787750152, "sd": 0.0227652993871388, "auc": 0.5362265116358323, "seeds": 3}, "ta": {"acc": 0.4730434782608695, "sd": 0.0722942945767879, "auc": 0.3949781978575929, "seeds": 3}, "te": {"acc": 0.5014306151645207, "sd": 0.0011167736048637, "auc": 0.7594670805012679, "seeds": 3}}, "hi": {"en": {"acc": 0.666, "sd": 0.0100374299499423, "auc": 0.8042723333333334, "seeds": 3}, "hi": {"acc": 0.987, "sd": 0.0008660254037844, "auc": 0.9991898333333332, "seeds": 3}, "poly_ood": {"acc": 0.6183545583181727, "sd": 0.0053069680989791, "auc": 0.7222674356670703, "seeds": 3}, "ta": {"acc": 0.5736231884057971, "sd": 0.0305505046330389, "auc": 0.7542553245116572, "seeds": 3}, "te": {"acc": 0.94241773962804, "sd": 0.0232013683440048, "auc": 0.978486280216373, "seeds": 3}}, "ta": {"en": {"acc": 0.4978333333333333, "sd": 0.0011547005383792, "auc": 0.5524445, "seeds": 3}, "hi": {"acc": 0.619, "sd": 0.0427901857906693, "auc": 0.7698213333333334, "seeds": 3}, "poly_ood": {"acc": 0.5338589043864969, "sd": 0.0230449341876342, "auc": 0.6915025161190119, "seeds": 3}, "ta": {"acc": 0.9756521739130436, "sd": 0.0015061311370164, "auc": 0.9933161940768748, "seeds": 3}, "te": {"acc": 0.6697067238912733, "sd": 0.0745714587100836, "auc": 0.9087357322232252, "seeds": 3}}, "te": {"en": {"acc": 0.47, "sd": 0.0545962452921443, "auc": 0.549884, "seeds": 3}, "hi": {"acc": 0.6363333333333333, "sd": 0.0620832774048964, "auc": 0.9009603333333334, "seeds": 3}, "poly_ood": {"acc": 0.6438245401253284, "sd": 0.0379082266565189, "auc": 0.7110279208242911, "seeds": 3}, "ta": {"acc": 0.6495652173913044, "sd": 0.0165674425071805, "auc": 0.7521557655954632, "seeds": 3}, "te": {"acc": 1.0, "sd": 0.0, "auc": 1.0, "seeds": 3}}}, "v2": {"en": {"en": {"acc": 0.9928333333333332, "sd": 0.0017559422921421, "auc": 0.9989591666666668, "seeds": 3}, "hi": {"acc": 0.516, "sd": 0.0169336942218761, "auc": 0.5187533333333333, "seeds": 3}, "poly_ood": {"acc": 0.6163331311906205, "sd": 0.0163688798349044, "auc": 0.6324289132481686, "seeds": 3}, "ta": {"acc": 0.3518840579710145, "sd": 0.0527671586394024, "auc": 0.1934069313169502, "seeds": 3}, "te": {"acc": 0.5243204577968527, "sd": 0.0273780414565545, "auc": 0.8231089247668343, "seeds": 3}}, "hi": {"en": {"acc": 0.7198333333333333, "sd": 0.0272503822603157, "auc": 0.7961403333333333, "seeds": 3}, "hi": {"acc": 0.9758333333333334, "sd": 0.0002886751345947, "auc": 0.9977471666666666, "seeds": 3}, "poly_ood": {"acc": 0.6184556296745503, "sd": 0.0085833328261824, "auc": 0.6703464853585054, "seeds": 3}, "ta": {"acc": 0.6707246376811594, "sd": 0.0263226071492349, "auc": 0.7610137366099559, "seeds": 3}, "te": {"acc": 0.9694206008583692, "sd": 0.005117699578417, "auc": 0.9852149299735368, "seeds": 3}}, "joint": {"en": {"acc": 0.9805, "sd": null, "auc": 0.9976185, "seeds": 1}, "hi": {"acc": 0.959, "sd": null, "auc": 0.993005, "seeds": 1}, "poly_ood": {"acc": 0.6719223771983021, "sd": null, "auc": 0.7202154235747927, "seeds": 1}, "ta": {"acc": 0.9669565217391304, "sd": null, "auc": 0.9929648393194708, "seeds": 1}, "te": {"acc": 0.996244635193133, "sd": null, "auc": 0.9999458914328868, "seeds": 1}}, "ta": {"en": {"acc": 0.4863333333333333, "sd": 0.0193670682689283, "auc": 0.3212206666666666, "seeds": 3}, "hi": {"acc": 0.5783333333333333, "sd": 0.0091696964689859, "auc": 0.6897760000000001, "seeds": 3}, "poly_ood": {"acc": 0.5208206994137862, "sd": 0.0146120660480047, "auc": 0.6086892804172991, "seeds": 3}, "ta": {"acc": 0.9756521739130436, "sd": 0.0015061311370164, "auc": 0.9933161940768748, "seeds": 3}, "te": {"acc": 0.5264663805436337, "sd": 0.0324219622246913, "auc": 0.7864977635125593, "seeds": 3}}, "te": {"en": {"acc": 0.581, "sd": 0.0983958840602594, "auc": 0.7254396666666666, "seeds": 3}, "hi": {"acc": 0.6138333333333333, "sd": 0.091500455372273, "auc": 0.8264023333333332, "seeds": 3}, "poly_ood": {"acc": 0.6055184960582171, "sd": 0.0419959695435907, "auc": 0.648981447123622, "seeds": 3}, "ta": {"acc": 0.6973913043478261, "sd": 0.0763387139258733, "auc": 0.7544604914933837, "seeds": 3}, "te": {"acc": 0.9991058655221744, "sd": 0.0006194745377571, "auc": 0.9995807545420496, "seeds": 3}}}}, "lora": {"comparison": [{"train": "en", "test": "en", "n_seeds": 3, "xlmr": 98.86666666666667, "xlmr_sd": 0.1443375672974064, "rembert": 99.5, "rembert_sd": 0.0500000000000042, "diff": 0.6333333333333352, "se": 0.0881917103688182, "ci95": 0.3794583033596698, "verdict": "RemBERT better", "kind": "in-language"}, {"train": "en", "test": "hi", "n_seeds": 3, "xlmr": 52.45000000000001, "xlmr_sd": 6.082762530298219, "rembert": 67.61666666666667, "rembert_sd": 7.608931155775648, "diff": 15.166666666666666, "se": 4.458917407223916, "ci95": 19.18517315391937, "verdict": "not distinguishable", "kind": "zero-shot"}, {"train": "en", "test": "te", "n_seeds": 3, "xlmr": 54.25608011444921, "xlmr_sd": 7.37857627570177, "rembert": 62.91130185979972, "rembert_sd": 20.712972080028077, "diff": 8.655221745350504, "se": 12.788898925341618, "ci95": 55.02619087161107, "verdict": "not distinguishable", "kind": "zero-shot"}, {"train": "en", "test": "ta", "n_seeds": 3, "xlmr": 39.130434782608695, "xlmr_sd": 1.280949553274456, "rembert": 43.82608695652174, "rembert_sd": 5.152494945052362, "diff": 4.695652173913044, "se": 3.185901519823527, "ci95": 13.707827870981658, "verdict": "not distinguishable", "kind": "zero-shot"}, {"train": "en", "test": "poly_ood", "n_seeds": 3, "xlmr": 61.15827774408732, "xlmr_sd": 2.995994372997205, "rembert": 57.38831615120275, "rembert_sd": 1.417127106839342, "diff": -3.769961592884577, "se": 0.98257786320046, "ci95": 4.227691325290853, "verdict": "not distinguishable", "kind": "out-of-distribution"}, {"train": "hi", "test": "en", "n_seeds": 3, "xlmr": 69.31666666666666, "xlmr_sd": 1.8843654988704643, "rembert": 70.14999999999999, "rembert_sd": 12.973338043849775, "diff": 0.833333333333338, "se": 6.6847047636958346, "ci95": 28.761963199085116, "verdict": "not distinguishable", "kind": "zero-shot"}, {"train": "hi", "test": "hi", "n_seeds": 3, "xlmr": 97.31666666666666, "xlmr_sd": 0.1258305739211795, "rembert": 98.48333333333336, "rembert_sd": 0.1443375672974064, "diff": 1.1666666666666714, "se": 0.1166666666666681, "ci95": 0.5019761518041103, "verdict": "RemBERT better", "kind": "in-language"}, {"train": "hi", "test": "te", "n_seeds": 3, "xlmr": 97.63948497854078, "xlmr_sd": 0.4258183440554655, "rembert": 98.78397711015737, "rembert_sd": 0.5736414496547019, "diff": 1.1444921316166017, "se": 0.5755893039853786, "ci95": 2.4765608900072817, "verdict": "not distinguishable", "kind": "zero-shot"}, {"train": "hi", "test": "ta", "n_seeds": 3, "xlmr": 68.26086956521739, "xlmr_sd": 7.205857730573814, "rembert": 79.71014492753623, "rembert_sd": 1.709162085542672, "diff": 11.449275362318836, "se": 3.440861739536631, "ci95": 14.804833156307769, "verdict": "not distinguishable", "kind": "zero-shot"}, {"train": "hi", "test": "poly_ood", "n_seeds": 3, "xlmr": 61.70406306852638, "xlmr_sd": 1.5880429806153409, "rembert": 60.30927835051546, "rembert_sd": 2.447596855137723, "diff": -1.3947847180109132, "se": 1.3113205152584924, "ci95": 5.642156794553423, "verdict": "not distinguishable", "kind": "out-of-distribution"}, {"train": "te", "test": "en", "n_seeds": 3, "xlmr": 56.13333333333333, "xlmr_sd": 5.789286081489952, "rembert": 50.25, "rembert_sd": 0.4769696007084703, "diff": -5.88333333333333, "se": 3.5299118654405177, "ci95": 15.18798492361266, "verdict": "not distinguishable", "kind": "zero-shot"}, {"train": "te", "test": "hi", "n_seeds": 3, "xlmr": 68.58333333333333, "xlmr_sd": 7.013261248045258, "rembert": 68.60000000000001, "rembert_sd": 18.70320828093405, "diff": 0.016666666666668, "se": 11.228695877576843, "ci95": 48.31317896918254, "verdict": "not distinguishable", "kind": "zero-shot"}, {"train": "te", "test": "te", "n_seeds": 3, "xlmr": 99.73175965665236, "xlmr_sd": 0.0536480686695313, "rembert": 99.96423462088698, "rembert_sd": 0.0309737268878574, "diff": 0.2324749642346214, "se": 0.0473131493394985, "ci95": 0.2035720511586374, "verdict": "RemBERT better", "kind": "in-language"}, {"train": "te", "test": "ta", "n_seeds": 3, "xlmr": 71.27536231884058, "xlmr_sd": 4.2478357290027535, "rembert": 54.81159420289854, "rembert_sd": 7.671089926987357, "diff": -16.463768115942027, "se": 6.058179040877329, "ci95": 26.066240587541817, "verdict": "not distinguishable", "kind": "zero-shot"}, {"train": "te", "test": "poly_ood", "n_seeds": 3, "xlmr": 65.32241762684454, "xlmr_sd": 1.9259066731698655, "rembert": 58.96502931069335, "rembert_sd": 7.58303974980853, "diff": -6.357388316151197, "se": 3.340144553735592, "ci95": 14.371482081888244, "verdict": "not distinguishable", "kind": "out-of-distribution"}, {"train": "ta", "test": "en", "n_seeds": 3, "xlmr": 48.4, "xlmr_sd": 1.9487175269905035, "rembert": 50.23333333333333, "rembert_sd": 0.2516611478423581, "diff": 1.8333333333333333, "se": 1.013382674237348, "ci95": 4.360233729588135, "verdict": "not distinguishable", "kind": "zero-shot"}, {"train": "ta", "test": "hi", "n_seeds": 3, "xlmr": 60.98333333333333, "xlmr_sd": 3.214939087033121, "rembert": 64.41666666666667, "rembert_sd": 12.485825296444498, "diff": 3.43333333333333, "se": 9.030011689422732, "ci95": 38.85300444516427, "verdict": "not distinguishable", "kind": "zero-shot"}, {"train": "ta", "test": "te", "n_seeds": 3, "xlmr": 53.41559370529328, "xlmr_sd": 3.2871574502500103, "rembert": 64.62804005722461, "rembert_sd": 9.682299830638206, "diff": 11.212446351931332, "se": 7.447297540895396, "ci95": 32.04313509359003, "verdict": "not distinguishable", "kind": "zero-shot"}, {"train": "ta", "test": "ta", "n_seeds": 3, "xlmr": 96.84057971014492, "xlmr_sd": 0.4376715614649678, "rembert": 97.7391304347826, "rembert_sd": 0.4347826086956488, "diff": 0.8985507246376775, "se": 0.0289855072463799, "ci95": 0.1247145718768092, "verdict": "RemBERT better", "kind": "in-language"}, {"train": "ta", "test": "poly_ood", "n_seeds": 3, "xlmr": 55.45785324439054, "xlmr_sd": 1.8570469372689549, "rembert": 54.87163937740045, "rembert_sd": 7.9661863055440225, "diff": -0.5862138669900929, "se": 5.483295743185351, "ci95": 23.59271739744005, "verdict": "not distinguishable", "kind": "out-of-distribution"}], "summary": {"in-language": {"pairs": 4, "mean_diff": 0.7327564222180764, "rembert_better": 4, "xlmr_better": 0, "not_distinguishable": 0}, "zero-shot": {"pairs": 12, "mean_diff": 3.007776637432358, "rembert_better": 0, "xlmr_better": 0, "not_distinguishable": 12}, "out-of-distribution": {"pairs": 4, "mean_diff": -3.027087123509195, "rembert_better": 0, "xlmr_better": 0, "not_distinguishable": 4}, "cost": {"rembert": {"trainable": 3.54, "minutes": 12.83, "peak": 2.04}, "xlmr": {"trainable": 1.48, "minutes": 2.3, "peak": 1.16}}}}, "demo": {"examples": [{"set": "A", "lang": "en", "truth": "FAKE", "model": "FAKE", "p_fake": 0.9998666048049927, "snippet": "According to CNN UK Prime Minister Theresa May delivered a rare public"}, {"set": "A", "lang": "en", "truth": "FAKE", "model": "FAKE", "p_fake": 0.9998741149902344, "snippet": "Much of the political world was shocked by the sudden resignation of N"}, {"set": "A", "lang": "en", "truth": "REAL", "model": "REAL", "p_fake": 0.00023643295571673661, "snippet": "The Spanish region of Catalonia should be allowed to determine its own"}, {"set": "A", "lang": "en", "truth": "REAL", "model": "REAL", "p_fake": 0.00020743839559145272, "snippet": "An Egyptian court on Saturday sentenced ousted president Mohammed Murs"}, {"set": "A", "lang": "hi", "truth": "FAKE", "model": "FAKE", "p_fake": 0.9998751878738403, "snippet": "म्यांमार तख्तापलट: क्या सेना के पास मतदाता धोखाधड़ी के सबूत हैं? प्रका"}, {"set": "A", "lang": "hi", "truth": "FAKE", "model": "FAKE", "p_fake": 0.9998766183853149, "snippet": "गलत-सीएए-विरोधी प्रदर्शनकारियों ने हिंदू देवताओं की तस्वीरें जलाईं विर"}, {"set": "A", "lang": "hi", "truth": "REAL", "model": "REAL", "p_fake": 0.0001881420612335205, "snippet": "अपनाएं ये घरेलू उपाय और हमेशा के लिए पाएं चिन के अनचाहे बालों से निजात"}, {"set": "A", "lang": "hi", "truth": "REAL", "model": "REAL", "p_fake": 0.0001888783008325845, "snippet": "टीम इंडिया की गेंदबाजी के फैन हुए ग्लेन मैकग्रा, इन तीन बोलर्स की खूब "}, {"set": "A", "lang": "te", "truth": "FAKE", "model": "FAKE", "p_fake": 0.9998766183853149, "snippet": "నకిలీ నకిలీ వయాగ్రా, నది నీటిని తాగిన తరువాత, గుత్తి గొర్రెల వార్తలు, "}, {"set": "A", "lang": "te", "truth": "FAKE", "model": "FAKE", "p_fake": 0.9998745918273926, "snippet": "మోడీ కరోనా యొక్క medicine షధం అమెరికాకు పంపారు ... కాబట్టి ట్రికోలర్ త"}, {"set": "A", "lang": "te", "truth": "REAL", "model": "REAL", "p_fake": 0.00017674513219390064, "snippet": "మకర సంక్రాంతి రోజు తయారు చేసే రుచికరమైన పొంగల్ తో ఎన్నో ఆరోగ్య ప్రయోజన"}, {"set": "A", "lang": "te", "truth": "REAL", "model": "REAL", "p_fake": 0.00018306818674318492, "snippet": "మనకు ఫేస్ మాస్క్‌లు ఇక అవసరం లేదు.. ఎందుకంటే? మనకు ఫేస్ మాస్క్‌లు ఇక అ"}, {"set": "B", "lang": "fr", "truth": "REAL", "model": "REAL", "p_fake": 0.00019335657998453826, "snippet": "Les aveux de Téhéran sur ces livraisons de drones à Moscou marquent en"}, {"set": "B", "lang": "hu", "truth": "REAL", "model": "FAKE", "p_fake": 0.9998517036437988, "snippet": "Éppen óriási kozmikus gyémánttá alakul egy, a Földtől 104 fényévre tal"}, {"set": "B", "lang": "hu", "truth": "REAL", "model": "REAL", "p_fake": 0.007052709814161062, "snippet": "Az NIQ kiskereskedelmi indexéből az derült ki a 2022-es évet vizsgálva"}, {"set": "B", "lang": "ro", "truth": "REAL", "model": "REAL", "p_fake": 0.00029137005913071334, "snippet": "Guvernul ar trebui să reia procedura pentru proiectul privind pensiile"}, {"set": "B", "lang": "it", "truth": "FAKE", "model": "FAKE", "p_fake": 0.9998103976249695, "snippet": "L'ambasciata russa in Italia ha ricevuto richieste di assistenza da pa"}, {"set": "B", "lang": "en", "truth": "FAKE", "model": "REAL", "p_fake": 0.00020342697098385543, "snippet": "Russia is deeply concerned with Kiev’s clear unwillingness – which has"}, {"set": "B", "lang": "es", "truth": "FAKE", "model": "REAL", "p_fake": 0.011266296729445457, "snippet": "Estados Unidos está tratando de presionar a Rusia mediante sanciones, "}, {"set": "B", "lang": "ru", "truth": "FAKE", "model": "REAL", "p_fake": 0.00023782205244060606, "snippet": "Управление инфраструктурой влияния на Беларусь находится в руках у зап"}, {"set": "typed", "lang": "en", "truth": "-", "model": "REAL", "p_fake": 0.0037727474700659513, "snippet": "Scientists announce breakthrough: this one trick cures everything, doc"}], "probe": {"en": {"n": 300, "base": 0.0, "year": 0.0, "cue": 0.0, "mean_p_base": 0.0002267181407660246, "mean_p_year": 0.0002273366117151454, "mean_p_cue": 0.0002761736395768821}, "hi": {"n": 300, "base": 0.006666666666666667, "year": 0.006666666666666667, "cue": 0.08666666666666667, "mean_p_base": 0.008281939662992954, "mean_p_year": 0.008281939662992954, "mean_p_cue": 0.090479277074337}, "te": {"n": 300, "base": 0.0, "year": 0.0, "cue": 0.0, "mean_p_base": 0.00019661392434500158, "mean_p_year": 0.00019661392434500158, "mean_p_cue": 0.00019779425929300487}}, "eval": {"en": 0.9965, "hi": 0.987, "te": 1.0, "poly_ood": 0.618253486961795}}, "status": {"items": [["Collect and clean corpora, fixed splits", true], ["Pipeline and architecture", true], ["Shortcut audit", true], ["XLM-R fine-tuning, 3 seeds, 4 languages", true], ["Cross-language and out-of-source evaluation", true], ["Cue ablation, confound controls, formatting-only test", true], ["RemBERT vs XLM-R, identical LoRA training", true], ["Tamil headline corpus, full rerun", true], ["Review deck, report, paper draft, dashboard", true], ["Human validation of the fake-class files, final paper", false]], "total": 10, "done": 9}, "method": {"steps": [["Collect", "Hindi and Telugu (Zenodo), English ISOT, Polyglot (18 languages), Tamil headlines (GitHub); read straight from the files."], ["Clean and deduplicate", "Exact duplicates removed, cross-label conflicts dropped, minimum length (60 words; Tamil headlines 4)."], ["Three text views", "V0 raw; V1 format-normalised; V2 middle window with head and tail cues removed."], ["Fixed splits", "By article id: test 20%, validation 10%, train 70%; same test articles for every model."], ["Train", "XLM-RoBERTa-base full fine-tuning (3 seeds), and RemBERT vs XLM-R with identical LoRA settings."], ["Evaluate", "In-language, zero-shot transfer, and a 13-language out-of-distribution set; accuracy, macro-F1, AUC; balanced tests."], ["Audit", "Format-only, first/last 120 characters, TF-IDF, cue ablation, cumulative controls, formatting-only transfer."], ["Report", "Tables, figures, deck, paper draft and this dashboard are all generated from results/."]], "model": [["Backbone", "XLM-RoBERTa-base, 12 layers, hidden 768, 278.0M parameters"], ["Compared with", "RemBERT, 32 layers, hidden 1152, 579.5M parameters (LoRA only)"], ["Full fine-tuning", "AdamW 2e-5, effective batch 16, 192 tokens, 2 epochs, fp16"], ["LoRA", "rank 16, alpha 32, query/key/value, lr 2e-4, same data and splits"], ["Training data", "2,500 articles per class per language (fewer for Tamil)"], ["Hardware", "one RTX 4050 laptop GPU, 6 GB"]], "reproduce": ["cd mlfn", "bash scripts/run_all.sh          # all training runs (about 8 h on this GPU)", "bash scripts/finalize.sh         # tables, report, paper draft, deck", ".venv\\Scripts\\python.exe scripts\\build_dashboard.py", "", "# live demo box:", ".venv\\Scripts\\python.exe scripts\\serve_dashboard.py", "# then open http://localhost:8765"], "limits": ["Tamil is a headline corpus of weak provenance; it is not comparable to article corpora.", "The reading of the Hindi, Telugu and Tamil fake classes comes from word lists and has not been checked by human labelling.", "Off-diagonal accuracies are unstable between runs; rely on patterns across pairs and on AUC.", "LoRA settings were not tuned for either model, and LoRA differs from full fine-tuning.", "Few seeds (3); differences of 1-3 points are within noise. The Polyglot set mixes 13 languages with few articles each.", "The literature check was a limited web search, not a systematic review.", "The demo checkpoint was trained before Tamil was added (English, Hindi, Telugu only)."], "files": [["REPORT.md", "full results with every table"], ["PAPER_DRAFT.md", "paper draft generated from results (TODO items remain)"], ["Multilingual_Fake_News_Review_Deck.pptx", "review slides"], ["results/", "every number on this page"], ["scripts/", "all code, one script per step"], ["WARNING_earlier_documents.md", "earlier figures that were never measured"]]}};
+const LS = ["en", "hi", "te", "ta"];
+const LN = { en: "English", hi: "Hindi", te: "Telugu", ta: "Tamil (headlines)", joint: "All four (1 seed)", poly_ood: "Polyglot (13 lang.)", poly: "Polyglot (13 lang.)" };
+const $ = (s, r) => (r || document).querySelector(s);
+const f1 = v => (v == null || Number.isNaN(v)) ? "–" : Number(v).toFixed(1);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const src = p => `<span class="src">source: ${esc(p)}</span>`;
+const pm = (m, s) => s == null || Number.isNaN(s) ? f1(m) : `${f1(m)} ± ${f1(s)}`;
+const X = (view, tr, te) => (D.xlmr[view] && D.xlmr[view][tr] && D.xlmr[view][tr][te]) || null;
+
+/* ---------- chart helpers (hand-drawn SVG, themed through CSS variables) ---------- */
+function ticks(a, b, step) { const t = []; for (let v = a; v <= b + 1e-9; v += step) t.push(v); return t; }
+function multiline(x, y, label, anchor) { return label.split("\n").map((ln, i) => `<text x="${x}" y="${y + i * 12}" text-anchor="${anchor || "middle"}">${esc(ln)}</text>`).join(""); }
+function groupedBars(o) {
+  const w = 780, h = o.h || 300, m = { l: 40, r: o.ref != null ? 56 : 12, t: 12, b: 46 }, iw = w - m.l - m.r, ih = h - m.t - m.b;
+  const y = v => m.t + ih - (v - o.ymin) / (o.ymax - o.ymin) * ih;
+  const gw = iw / o.cats.length, bw = Math.min(28, gw * 0.84 / o.series.length);
+  let s = `<svg viewBox="0 0 ${w} ${h}" width="100%" role="img" aria-label="${esc(o.label)}">`;
+  ticks(o.ymin, o.ymax, o.step).forEach(t => { s += `<line class="grid" x1="${m.l}" x2="${w - m.r}" y1="${y(t)}" y2="${y(t)}"/><text x="${m.l - 6}" y="${y(t) + 4}" text-anchor="end">${t}</text>`; });
+  if (o.ref != null) s += `<line x1="${m.l}" x2="${w - m.r}" y1="${y(o.ref)}" y2="${y(o.ref)}" stroke="var(--bad)" stroke-dasharray="5 4"/><text x="${w - m.r + 6}" y="${y(o.ref) + 4}" text-anchor="start" style="fill:var(--bad)">chance</text>`;
+  o.cats.forEach((c, i) => {
+    const cx = m.l + gw * i + gw / 2, x0 = cx - bw * o.series.length / 2;
+    o.series.forEach((sr, j) => {
+      const v = sr.vals[i]; if (v == null) return;
+      const bx = x0 + j * bw, by = y(Math.max(v, o.ymin));
+      s += `<rect x="${bx + 1}" y="${by}" width="${bw - 2}" height="${Math.max(0, y(o.ymin) - by)}" style="fill:var(--${sr.c})"><title>${esc(c.replace("\n", " "))} | ${esc(sr.name)}: ${f1(v)}</title></rect>`;
+      if (o.series.length <= 4) s += `<text x="${bx + bw / 2}" y="${by - 3}" text-anchor="middle" style="font-size:9px">${Math.round(v)}</text>`;
+    });
+    s += multiline(cx, h - m.b + 16, c);
+  });
+  s += `<line class="axis" x1="${m.l}" x2="${w - m.r}" y1="${y(o.ymin)}" y2="${y(o.ymin)}"/></svg>`;
+  return s + `<div class="legend">${o.series.map(sr => `<span><i style="background:var(--${sr.c})"></i>${esc(sr.name)}</span>`).join("")}</div>`;
+}
+function lineChart(o) {
+  const w = 780, h = 290, m = { l: 40, r: 34, t: 12, b: 36 }, iw = w - m.l - m.r, ih = h - m.t - m.b;
+  const y = v => m.t + ih - (v - o.ymin) / (o.ymax - o.ymin) * ih, x = i => m.l + (o.cats.length === 1 ? iw / 2 : i * iw / (o.cats.length - 1));
+  let s = `<svg viewBox="0 0 ${w} ${h}" width="100%" role="img" aria-label="${esc(o.label)}">`;
+  ticks(o.ymin, o.ymax, o.step).forEach(t => { s += `<line class="grid" x1="${m.l}" x2="${w - m.r}" y1="${y(t)}" y2="${y(t)}"/><text x="${m.l - 6}" y="${y(t) + 4}" text-anchor="end">${t}</text>`; });
+  if (o.ref != null) s += `<line x1="${m.l}" x2="${w - m.r}" y1="${y(o.ref)}" y2="${y(o.ref)}" stroke="var(--bad)" stroke-dasharray="5 4"/>`;
+  o.cats.forEach((c, i) => { s += `<text x="${x(i)}" y="${h - 14}" text-anchor="middle">${esc(c)}</text>`; });
+  o.series.forEach(sr => {
+    const pts = sr.vals.map((v, i) => v == null ? null : [x(i), y(v)]).filter(Boolean);
+    s += `<polyline fill="none" stroke-width="2.2" style="stroke:var(--${sr.c})" points="${pts.map(p => p.join(",")).join(" ")}"/>`;
+    pts.forEach((p, k) => { s += `<circle cx="${p[0]}" cy="${p[1]}" r="3.2" style="fill:var(--${sr.c})"><title>${esc(sr.name)}: ${f1(sr.vals[sr.vals.findIndex((v, i) => v != null && x(i) === p[0])])}</title></circle>`; });
+  });
+  s += `</svg><div class="legend">${o.series.map(sr => `<span><i style="background:var(--${sr.c})"></i>${esc(sr.name)}</span>`).join("")}</div>`;
+  return s;
+}
+function diffChart(rows) {
+  const w = 780, rh = 26, m = { l: 168, r: 18, t: 22, b: 30 }, h = m.t + m.b + rows.length * rh, iw = w - m.l - m.r;
+  const ext = Math.min(60, Math.ceil(Math.max(...rows.map(r => Math.abs(r.diff) + (r.ci || 0))) / 10) * 10 || 10);
+  const x = v => m.l + (Math.max(-ext, Math.min(ext, v)) + ext) / (2 * ext) * iw;
+  let s = `<svg viewBox="0 0 ${w} ${h}" width="100%" role="img" aria-label="RemBERT minus XLM-R accuracy difference with 95% intervals">`;
+  ticks(-ext, ext, ext >= 40 ? 20 : 10).forEach(t => { s += `<line class="grid" x1="${x(t)}" x2="${x(t)}" y1="${m.t - 6}" y2="${h - m.b}"/><text x="${x(t)}" y="${h - m.b + 14}" text-anchor="middle">${t}</text>`; });
+  s += `<line class="axis" x1="${x(0)}" x2="${x(0)}" y1="${m.t - 6}" y2="${h - m.b}"/>`;
+  const col = { "RemBERT better": "good", "XLM-R better": "warn", "not distinguishable": "muted" };
+  rows.forEach((r, i) => {
+    const cy = m.t + i * rh + rh / 2, c = col[r.verdict] || "muted";
+    s += `<text x="${m.l - 8}" y="${cy + 4}" text-anchor="end" class="ink" style="font-size:11px">${esc(r.label)}</text>`;
+    s += `<rect x="${Math.min(x(0), x(r.diff))}" y="${cy - 7}" width="${Math.abs(x(r.diff) - x(0))}" height="14" style="fill:var(--${c});opacity:${c === "muted" ? .55 : 1}"><title>${esc(r.label)}: ${r.diff >= 0 ? "+" : ""}${f1(r.diff)} (95% ± ${f1(r.ci)}) ${esc(r.verdict)}</title></rect>`;
+    if (r.ci != null && !Number.isNaN(r.ci)) s += `<line x1="${x(r.diff - r.ci)}" x2="${x(r.diff + r.ci)}" y1="${cy}" y2="${cy}" stroke="var(--ink)" stroke-width="1.4"/>`;
+  });
+  s += `<text x="${m.l + iw / 2}" y="${h - 2}" text-anchor="middle">accuracy points, RemBERT minus XLM-R (bars: 95% interval over 3 seeds)</text></svg>`;
+  return s + `<div class="legend"><span><i style="background:var(--good)"></i>RemBERT better</span><span><i style="background:var(--warn)"></i>XLM-R better</span><span><i style="background:var(--muted);opacity:.55"></i>not distinguishable</span></div>`;
+}
+function heatBg(v) { const d = v - 50; return d >= 0 ? `color-mix(in srgb, var(--accent) ${Math.min(75, d / 50 * 85)}%, var(--surface))` : `color-mix(in srgb, var(--bad) ${Math.min(75, -d / 50 * 120)}%, var(--surface))`; }
+function heatGrid(rows, cols, get, onPick) {
+  const box = document.createElement("div"); box.className = "scroll";
+  const g = document.createElement("div"); g.className = "heat"; g.style.gridTemplateColumns = `130px repeat(${cols.length}, minmax(70px, 1fr))`;
+  g.innerHTML = `<div></div>` + cols.map(c => `<div class="hd">${esc(LN[c] || c)}</div>`).join("");
+  rows.forEach(r => {
+    g.insertAdjacentHTML("beforeend", `<div class="rl">${esc(LN[r] || r)}</div>`);
+    cols.forEach(c => {
+      const cell = get(r, c), b = document.createElement("button"); b.type = "button"; b.className = "cell" + (r === c ? " diag" : ""); b.setAttribute("aria-pressed", "false");
+      if (cell) { b.textContent = f1(cell.v); b.style.background = heatBg(cell.v); b.title = `trained on ${LN[r] || r}, tested on ${LN[c] || c}`; b.addEventListener("click", () => { g.querySelectorAll(".cell").forEach(x => x.setAttribute("aria-pressed", "false")); b.setAttribute("aria-pressed", "true"); onPick && onPick(r, c, cell); }); }
+      else { b.textContent = "–"; b.disabled = true; b.style.background = "var(--surface2)"; }
+      g.appendChild(b);
+    });
+  });
+  box.appendChild(g); return box;
+}
+const tabsDef = [["overview", "Overview"], ["data", "Data"], ["audit", "Audit"], ["accuracy", "Accuracy"], ["transfer", "Transfer"], ["models", "RemBERT vs XLM-R"], ["controls", "Controls"], ["demo", "Live demo"], ["method", "Method"]];
+const renderers = {};
+
+/* ---------- Overview ---------- */
+renderers.overview = p => {
+  const inl = LS.map(l => X("v2", l, l).acc * 100), nm = ["Hindi_zip:hi", "Telugu_zip:te", "ISOT:en", "Tamil_gh:ta"].map(k => Math.max(D.audit[k].fmt, D.audit[k].head, D.audit[k].tail) * 100);
+  const off = []; LS.forEach(a => LS.concat(["poly_ood"]).forEach(b => { if (a !== b && !(a === "hi" && b === "te")) { const c = X("v2", a, b); if (c) off.push(c.acc * 100); } }));
+  const hite = X("v2", "hi", "te"), teen = X("v2", "te", "en"), s = D.lora.summary, oos = s ? s["zero-shot"].pairs + s["out-of-distribution"].pairs : 0, nd = s ? s["zero-shot"].not_distinguishable + s["out-of-distribution"].not_distinguishable : 0;
+  const rng = a => `${f1(Math.min(...a))}–${f1(Math.max(...a))}%`;
+  p.innerHTML = `
+    <p class="verdict">On these corpora, accuracy mostly measures <b>which source an article came from</b>, not whether the claim is false.</p>
+    <div class="grid g4">
+      <div class="card kpi good"><div class="label">In-language accuracy</div><div class="num">${rng(inl)}</div><div class="note">XLM-RoBERTa, same language and source as training. A bag of n-grams is within about 2 points.</div>${src("results/xlmr_summary.csv (view V2, 3 seeds)")}</div>
+      <div class="card kpi bad"><div class="label">Without reading words</div><div class="num">${rng(nm)}</div><div class="note">Best of: 12 formatting numbers, first 120 characters, last 120 characters.</div>${src("results/audit.json")}</div>
+      <div class="card kpi bad"><div class="label">Other language or source</div><div class="num">${rng(off)}</div><div class="note">Chance is 50%. One exception: Hindi to Telugu ${f1(hite.acc * 100)}%, a shared dataset artefact (hypothesis).</div>${src("results/xlmr_summary.csv (view V2)")}</div>
+      <div class="card kpi warn"><div class="label">RemBERT vs XLM-R (LoRA)</div><div class="num">${s ? nd + " / " + oos : "pending"}</div><div class="note">other-language or other-source pairs where the two are indistinguishable. In-language RemBERT is ahead by under 2 points.</div>${src("results/lora_comparison.csv (" + D.meta.lora_runs + " of " + D.meta.lora_expected + " runs)")}</div>
+    </div>
+    <div class="grid g2" style="margin-top:14px">
+      <div class="card"><h3>What this means</h3><ul class="clean">
+        <li>A high score on a single corpus does not show that a model detects misinformation. A classifier that sees no words already gets ${f1(Math.min(...nm))}% or more.</li>
+        <li>The Hindi and Telugu "fake" files read as fact-check articles; the Tamil "fake" headlines look like translated English claims.</li>
+        <li>An English-trained model is <b>inverted</b> on Tamil headlines (${f1(X("v2", "en", "ta").acc * 100)}% accuracy, AUC ${f1(X("v2", "en", "ta").auc * 100)}%).</li>
+        <li>Evaluate across sources, not only inside one corpus.</li></ul></div>
+      <div class="card"><h3>Read before quoting a number</h3><ul class="clean">
+        <li>Tamil is a short-headline corpus with no stated licence and an undocumented fake class. It is a separate audit case, not an article corpus.</li>
+        <li>Single off-diagonal accuracies are unstable between runs: Telugu to English has a standard deviation of ${f1(teen.sd * 100)} points over 3 seeds.</li>
+        <li>The fake-class description comes from word lists; a human check has not been done.</li>
+        <li>The literature check was a limited search, not a systematic review.</li></ul></div>
+    </div>
+    <div class="card" style="margin-top:14px"><h3>Project status: ${D.status.done} of ${D.status.total} work packages executed</h3>
+      <div class="tags">${D.status.items.map(i => `<span class="tag ${i[1] ? "r" : "f"}">${i[1] ? "done" : "open"}: ${esc(i[0])}</span>`).join("")}</div>${src("README.md, MORNING_CHECKLIST.md")}</div>`;
+};
+
+/* ---------- Data ---------- */
+renderers.data = p => {
+  const rows = D.funnel.map(r => `<tr${r.total ? ' class="total"' : ""}><td>${esc(r.corpus)}</td><td class="n">${r.raw.toLocaleString("en-US")}</td><td class="n">${r.after_dedup.toLocaleString("en-US")}</td><td class="n">${r.dup_pct}%</td><td class="n">${r.final.toLocaleString("en-US")}</td>
+    <td class="n">${r.fake.toLocaleString("en-US")}</td><td class="n">${r.real.toLocaleString("en-US")}</td><td><div class="bar" title="fake ${(r.fake / (r.fake + r.real) * 100).toFixed(0)}% / real ${(r.real / (r.fake + r.real) * 100).toFixed(0)}%"><i class="f" style="width:${r.fake / (r.fake + r.real) * 100}%"></i><i class="r" style="width:${r.real / (r.fake + r.real) * 100}%"></i></div></td><td class="n">${r.mean_words || ""}</td></tr>`).join("");
+  p.innerHTML = `<h2>Datasets</h2><p class="muted">After exact-duplicate removal (cross-label conflicts dropped) and a minimum length: 60 words, Tamil headlines 4 words.</p>
+    <div class="card scroll" style="margin-top:12px"><table><thead><tr><th>Corpus</th><th class="n">Raw</th><th class="n">After dedup</th><th class="n">Duplicates</th><th class="n">Usable</th><th class="n">Fake</th><th class="n">Real</th><th>Fake / real</th><th class="n">Mean words</th></tr></thead><tbody>${rows}</tbody></table><div class="legend"><span><i style="background:var(--bad)"></i>fake</span><span><i style="background:var(--accent)"></i>real</span></div>${src("results/dataset_funnel.csv")}</div>
+    <div class="grid g2" style="margin-top:14px">
+      <div class="card"><h3>Sources</h3><ul class="clean">
+        <li><b>Hindi, Telugu:</b> Zenodo 10.5281/zenodo.11408513 (Patil et al., CC BY 4.0).</li>
+        <li><b>English:</b> ISOT Fake/True news.</li>
+        <li><b>Polyglot:</b> 18 languages, Fake.xlsx and Real.xlsx. The 20.xlsx and 80.xlsx files split the same rows and were not used.</li>
+        <li><b>Tamil:</b> GitHub AjhayAk/FakeNewsDetectionTamil, TamilFakeAndReal.csv. Headlines only, no licence stated, fake-class origin undocumented.</li></ul></div>
+      <div class="card"><h3>Why the funnel matters</h3><ul class="clean">
+        <li>Telugu lost ${D.funnel[1].dup_pct}% and Hindi ${D.funnel[0].dup_pct}% of their files to exact duplicates. Duplicates across train and test would inflate accuracy.</li>
+        <li>Splits are fixed by article id: test 20%, validation 10%, train 70%. Every model sees the same test articles.</li>
+        <li>All test sets are class-balanced, so chance is 50%.</li></ul></div>
+    </div>`;
+};
+
+/* ---------- Audit ---------- */
+renderers.audit = p => {
+  const keys = [["Hindi_zip:hi", "Hindi"], ["Telugu_zip:te", "Telugu"], ["ISOT:en", "English\n(ISOT)"], ["Tamil_gh:ta", "Tamil\n(headlines)"], ["Polyglot:es", "Spanish\n(Polyglot)"], ["Polyglot:de", "German\n(Polyglot)"]];
+  const ser = [["Format only (12 numbers)", "fmt", "s2"], ["First 120 characters", "head", "s3"], ["Last 120 characters", "tail", "s1"], ["Full text (reference)", "full", "s4"]];
+  const chart = groupedBars({ cats: keys.map(k => k[1]), series: ser.map(s => ({ name: s[0], c: s[2], vals: keys.map(k => D.audit[k[0]][s[1]] * 100) })), ymin: 0, ymax: 100, step: 20, ref: 50, label: "Balanced accuracy of classifiers that cannot read meaning" });
+  const rows = keys.map(k => `<tr><td>${esc(k[1].replace("\n", " "))}</td><td class="n">${D.audit[k[0]].n.toLocaleString("en-US")}</td>${ser.map(s => `<td class="n">${f1(D.audit[k[0]][s[1]] * 100)}</td>`).join("")}</tr>`).join("");
+  const cue = l => { const c = D.cues[l]; return `<tr><td>${esc(LN[l])}</td><td><div class="tags">${c.fake.slice(0, 10).map(w => `<span class="tag f">${esc(w)}</span>`).join("")}</div></td><td><div class="tags">${c.real.slice(0, 10).map(w => `<span class="tag r">${esc(w)}</span>`).join("")}</div></td><td class="n">${Math.round(c.year_fake * 100)}% / ${Math.round(c.year_real * 100)}%</td></tr>`; };
+  p.innerHTML = `<h2>Models that cannot read meaning</h2><p class="muted">Balanced accuracy, 75/25 split, chance = 50. If these are high, the label is recoverable from format or style, so a high in-language score proves little.</p>
+    <div class="card" style="margin-top:12px">${chart}${src("results/audit.json")}</div>
+    <div class="card scroll" style="margin-top:14px"><table><thead><tr><th>Corpus</th><th class="n">Articles</th>${ser.map(s => `<th class="n">${esc(s[0])}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>${src("results/audit.json")}</div>
+    <div class="card scroll" style="margin-top:14px"><h3>Strongest remaining words (view V2: head, tail and format cues removed)</h3>
+      <table><thead><tr><th>Corpus</th><th>Push toward FAKE</th><th>Push toward REAL</th><th class="n">Year token<br>fake / real</th></tr></thead><tbody>${["hi", "te", "ta", "en"].map(cue).join("")}</tbody></table>
+      <p class="muted" style="margin-top:8px">Hindi and Telugu fake sides are fact-check vocabulary (viral, claim, video, a fact-checker's name). Tamil fake side is US-centric claim vocabulary (truth, says, Trump, Obama); the real side is local Tamil Nadu news. Read from word lists, not human-validated.</p>${src("results/top_cues_v2.json")}</div>`;
+};
+
+/* ---------- Accuracy ---------- */
+renderers.accuracy = p => {
+  const ser = [["TF-IDF, raw (V0)", "t0", "s2"], ["TF-IDF, middle (V2)", "t2", "s3"], ["XLM-R, raw (V0)", "x0", "s1"], ["XLM-R, middle (V2)", "x2", "s4"]];
+  const val = (l, k) => k === "t0" ? D.tfidf[l].v0.mean * 100 : k === "t2" ? D.tfidf[l].v2.mean * 100 : k === "x0" ? X("v0", l, l).acc * 100 : X("v2", l, l).acc * 100;
+  const chart = groupedBars({ cats: LS.map(l => LN[l].replace(" (headlines)", "\n(headlines)")), series: ser.map(s => ({ name: s[0], c: s[2], vals: LS.map(l => val(l, s[1])) })), ymin: 85, ymax: 100, step: 5, label: "In-language accuracy, TF-IDF vs XLM-R", h: 290 });
+  const rows = LS.map(l => `<tr><td>${esc(LN[l])}</td><td class="n">${f1(D.tfidf[l].v0.mean * 100)}</td><td class="n">${f1(D.tfidf[l].v2.mean * 100)}</td><td class="n">${pm(X("v0", l, l).acc * 100, X("v0", l, l).sd * 100)}</td><td class="n">${pm(X("v2", l, l).acc * 100, X("v2", l, l).sd * 100)}</td></tr>`).join("");
+  p.innerHTML = `<h2>In-language accuracy: transformer vs bag of n-grams</h2><p class="muted">Test accuracy on the same fixed test articles. The y-axis starts at 85%.</p>
+    <div class="card" style="margin-top:12px">${chart}${src("results/tfidf_views.json, results/xlmr_summary.csv")}</div>
+    <div class="card scroll" style="margin-top:14px"><table><thead><tr><th>Corpus</th><th class="n">TF-IDF V0</th><th class="n">TF-IDF V2</th><th class="n">XLM-R V0 (mean ± SD)</th><th class="n">XLM-R V2 (mean ± SD)</th></tr></thead><tbody>${rows}</tbody></table>
+      <p class="muted" style="margin-top:8px">XLM-R: 3 seeds, 2,500 training articles per class (fewer for Tamil), 2 epochs. The transformer is within about two points of a bag of character n-grams on every corpus, so neither number shows detection of misinformation.</p>${src("results/xlmr_summary.csv")}</div>`;
+};
+
+/* ---------- Transfer ---------- */
+renderers.transfer = p => {
+  let view = "v2", metric = "acc", fmtset = "scale_free";
+  p.innerHTML = `<h2>Does it transfer to another language or source?</h2><p class="muted">Rows: training corpus. Columns: test set. Outlined cells are same corpus. 50 = chance; red is below chance. Click a cell for details.</p>
+    <div class="controls"><span class="lab">View</span><button class="tog" data-v="v2" aria-pressed="true" type="button">V2 middle window</button><button class="tog" data-v="v0" aria-pressed="false" type="button">V0 raw</button>
+      <span class="lab" style="margin-left:12px">Metric</span><button class="tog" data-m="acc" aria-pressed="true" type="button">Accuracy</button><button class="tog" data-m="auc" aria-pressed="false" type="button">AUC</button></div>
+    <div class="card"><div id="heatHost"></div><div class="detail" id="heatDetail" style="margin-top:10px">Click a cell.</div>${src("results/xlmr_summary.csv (XLM-R full fine-tuning, mean of 3 seeds; joint model 1 seed)")}</div>
+    <div class="grid g2" style="margin-top:14px">
+      <div class="callout bad"><b>Tamil is isolated.</b> English to Tamil is ${f1(X("v2", "en", "ta").acc * 100)}% with AUC ${f1(X("v2", "en", "ta").auc * 100)}%: the English-learned cues point the wrong way on Tamil headlines.</div>
+      <div class="callout"><b>Hindi to Telugu works</b> (${f1(X("v2", "hi", "te").acc * 100)}%) but both corpora come from one release built the same way. The formatting-only test below supports a shared artefact. <b>Some pairs are unstable:</b> Telugu to English varies by ±${f1(X("v2", "te", "en").sd * 100)} points between seeds.</div>
+    </div>
+    <div class="card" style="margin-top:14px"><h3>Formatting only, no words</h3><p class="muted">Gradient boosting on formatting numbers cannot use language. If it transfers between two corpora, they share formatting differences between fake and real.</p>
+      <div class="controls"><button class="tog" data-f="scale_free" aria-pressed="true" type="button">7 scale-free ratios and flags</button><button class="tog" data-f="all12" aria-pressed="false" type="button">12 statistics</button></div><div id="fmtHost"></div>${src("results/fmt_transfer.json")}</div>`;
+  const draw = () => {
+    const host = $("#heatHost", p); host.innerHTML = "";
+    const rows = LS.concat(view === "v2" ? ["joint"] : []);
+    host.appendChild(heatGrid(rows, LS.concat(["poly_ood"]), (r, c) => { const x = X(view, r, c); return x ? { v: (metric === "acc" ? x.acc : x.auc) * 100, x } : null; },
+      (r, c, cell) => { const x = cell.x; $("#heatDetail", p).innerHTML = `trained on <b>${esc(LN[r])}</b>, tested on <b>${esc(LN[c])}</b>: accuracy <b>${pm(x.acc * 100, x.sd * 100)}</b> (${x.seeds} seed${x.seeds > 1 ? "s" : ""}), AUC <b>${f1(x.auc * 100)}</b>`; }));
+  };
+  const drawF = () => { const F = D.fmt[fmtset], host = $("#fmtHost", p); host.innerHTML = ""; host.appendChild(heatGrid(LS, LS.concat(["poly"]), (r, c) => { const x = F[r + "->" + c]; return x ? { v: x * 100 } : null; })); };
+  p.addEventListener("click", e => {
+    const b = e.target.closest("button.tog"); if (!b) return;
+    if (b.dataset.v) { view = b.dataset.v; p.querySelectorAll("[data-v]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); draw(); }
+    if (b.dataset.m) { metric = b.dataset.m; p.querySelectorAll("[data-m]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); draw(); }
+    if (b.dataset.f) { fmtset = b.dataset.f; p.querySelectorAll("[data-f]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); drawF(); }
+  });
+  draw(); drawF();
+};
+
+/* ---------- RemBERT vs XLM-R ---------- */
+renderers.models = p => {
+  const L = D.lora, rows = L.comparison, s = L.summary;
+  if (!rows.length) { p.innerHTML = `<h2>RemBERT vs XLM-RoBERTa</h2><div class="callout">Comparison runs are not finished yet (${D.meta.lora_runs} of ${D.meta.lora_expected}).</div>`; return; }
+  const order = { "in-language": 0, "zero-shot": 1, "out-of-distribution": 2 };
+  const sorted = rows.slice().sort((a, b) => order[a.kind] - order[b.kind] || LS.indexOf(a.train) - LS.indexOf(b.train) || (a.test === "poly_ood") - (b.test === "poly_ood") || LS.indexOf(a.test) - LS.indexOf(b.test));
+  sorted.forEach(r => r.label = `${LN[r.train].replace(" (headlines)", "")} → ${LN[r.test].replace(" (headlines)", "").replace(" (13 lang.)", "")}`);
+  const pill = v => `<span class="pill ${v === "RemBERT better" ? "good" : v === "XLM-R better" ? "warn" : "mute"}">${esc(v)}</span>`;
+  const tr = sorted.map(r => `<tr><td>${esc(r.label)}</td><td>${esc(r.kind)}</td><td class="n">${pm(r.xlmr, r.xlmr_sd)}</td><td class="n">${pm(r.rembert, r.rembert_sd)}</td><td class="n">${r.diff >= 0 ? "+" : ""}${f1(r.diff)} (± ${f1(r.ci95)})</td><td>${pill(r.verdict)}</td></tr>`).join("");
+  const c = s.cost, ratio = c.rembert.minutes / c.xlmr.minutes;
+  p.innerHTML = `<h2>RemBERT vs XLM-RoBERTa under identical LoRA training</h2><p class="muted">Same data, splits and settings (LoRA rank 16 on the attention projections, learning rate 2e-4, 2 epochs). ${D.meta.lora_runs} of ${D.meta.lora_expected} runs finished. A pair counts as different only if all seeds agree in sign and the mean exceeds the 95% t-interval.</p>
+    <div class="grid g4" style="margin-top:12px">
+      <div class="card kpi"><div class="label">In-language</div><div class="num">${s["in-language"].rembert_better} / ${s["in-language"].pairs}</div><div class="note">languages where RemBERT is better, by ${f1(Math.min(...rows.filter(r => r.kind === "in-language").map(r => r.diff)))} to ${f1(Math.max(...rows.filter(r => r.kind === "in-language").map(r => r.diff)))} points, at the ceiling</div></div>
+      <div class="card kpi warn"><div class="label">Other language or source</div><div class="num">${s["zero-shot"].not_distinguishable + s["out-of-distribution"].not_distinguishable} / ${s["zero-shot"].pairs + s["out-of-distribution"].pairs}</div><div class="note">pairs indistinguishable from seed noise</div></div>
+      <div class="card kpi"><div class="label">Training time</div><div class="num">${f1(ratio)}×</div><div class="note">RemBERT ${f1(c.rembert.minutes)} min vs XLM-R ${f1(c.xlmr.minutes)} min per run</div></div>
+      <div class="card kpi"><div class="label">Trainable parameters</div><div class="num">${f1(c.rembert.trainable)}M</div><div class="note">RemBERT (579.5M total) vs XLM-R ${f1(c.xlmr.trainable)}M (279.5M total)</div></div>
+    </div>
+    <div class="card" style="margin-top:14px">${diffChart(sorted)}${src("results/lora_comparison.csv, results/lora_summary.json")}</div>
+    <div class="card scroll" style="margin-top:14px"><table><thead><tr><th>Train → test</th><th>Type</th><th class="n">XLM-R</th><th class="n">RemBERT</th><th class="n">Difference</th><th>Verdict</th></tr></thead><tbody>${tr}</tbody></table>
+      <p class="muted" style="margin-top:8px">Not tuned for either model; LoRA, not full fine-tuning; no correction for testing many pairs. This neither confirms nor contradicts PolyTruth, which uses a different task and corpus.</p>${src("results/lora_comparison.csv")}</div>`;
+};
+
+/* ---------- Controls ---------- */
+renderers.controls = p => {
+  const ks = D.ablation_ks, ser = LS.map((l, i) => ({ name: LN[l], c: ["s4", "s2", "s1", "s3"][i], vals: ks.map(k => D.ablation[l][k] == null ? null : D.ablation[l][k] * 100) }));
+  const chart = lineChart({ cats: ks.map(k => k === "0" ? "none" : k), series: ser, ymin: 40, ymax: 100, step: 10, ref: 50, label: "Bag-of-words accuracy as the strongest cue words are removed" });
+  const names = ["C0 v2", "C1 +no digits", "C2 +no latin/agency", "C3 +length matched"], lab = ["As is (V2)", "+ digits removed", "+ Latin tokens removed", "+ length matched"];
+  const rows = names.map((n, i) => `<tr><td>${lab[i]}</td>${LS.map(l => `<td class="n">${f1(D.controls[l][i] * 100)}</td>`).join("")}</tr>`).join("");
+  p.innerHTML = `<h2>Do simple fixes remove the shortcut?</h2><p class="muted">Bag-of-words and character n-gram classifiers after removing cues. For the article corpora the signal is spread over thousands of words; for short Tamil headlines it is more concentrated.</p>
+    <div class="card" style="margin-top:12px"><h3>Removing the k strongest words (chosen on train only)</h3>${chart}<div class="muted" style="font-size:.8rem">x-axis: number of words removed. Lines stop where the vocabulary runs out.</div>${src("results/cue_ablation.json")}</div>
+    <div class="card scroll" style="margin-top:14px"><h3>Cumulative confound controls</h3><table><thead><tr><th>Control</th>${LS.map(l => `<th class="n">${esc(LN[l])}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>${src("results/controlled.json")}</div>`;
+};
+
+/* ---------- Demo ---------- */
+renderers.demo = p => {
+  const ex = D.demo.examples, mark = e => e.truth === "-" ? "" : e.truth === e.model ? "good" : "bad";
+  const rows = ex.map(e => `<tr><td>${{ A: "held-out", B: "other source", typed: "typed" }[e.set]}</td><td>${esc(e.lang)}</td><td>${esc(e.truth)}</td><td><span class="pill ${mark(e)}">${esc(e.model)}</span></td><td class="n">${f1(e.p_fake)}</td><td>${esc(e.snippet)}</td></tr>`).join("");
+  const pr = D.demo.probe, pe = D.demo.eval;
+  p.innerHTML = `<h2>The saved demo model</h2><p class="muted">XLM-RoBERTa fine-tuned on English, Hindi and Telugu (trained before Tamil was added; 1 seed). Held-out accuracy: ${["en", "hi", "te"].map(l => `${LN[l]} ${f1(pe[l] * 100)}%`).join(", ")}; other-source Polyglot ${f1(pe.poly_ood * 100)}%.</p>
+    <div class="card scroll" style="margin-top:12px"><h3>Predictions on real held-out articles and one typed sentence</h3><table><thead><tr><th>Set</th><th>Lang</th><th>Truth</th><th>Model says</th><th class="n">P(fake)</th><th>Start of text</th></tr></thead><tbody>${rows}</tbody></table>${src("results/demo_examples.json")}</div>
+    <div class="grid g2" style="margin-top:14px">
+      <div class="card"><h3>One-cue probe</h3><p class="muted">Add one cue to real articles; how many flip to FAKE?</p><table><thead><tr><th>Language</th><th class="n">as is</th><th class="n">+ year 2019</th><th class="n">+ "viral"</th></tr></thead><tbody>${["en", "hi", "te"].map(l => `<tr><td>${LN[l]}</td><td class="n">${f1(pr[l].base * 100)}%</td><td class="n">${f1(pr[l].year * 100)}%</td><td class="n">${f1(pr[l].cue * 100)}%</td></tr>`).join("")}</tbody></table><p class="muted" style="margin-top:8px">One cue flips at most ${f1(Math.max(...["en", "hi", "te"].map(l => Math.max(pr[l].year, pr[l].cue))) * 100)}% of verdicts: the signal is spread out.</p>${src("results/demo_probe.json")}</div>
+      <div class="card" id="liveCard"><h3>Try it</h3><p class="muted" id="liveMsg"></p><textarea id="liveText" placeholder="Paste a few paragraphs of an article (English, Hindi or Telugu). The model reads the first 192 tokens."></textarea><div class="controls"><button class="go" id="liveGo" type="button">Classify</button></div><div id="liveOut" class="detail"></div></div>
+    </div>`;
+  const msg = $("#liveMsg", p), go = $("#liveGo", p), out = $("#liveOut", p);
+  if (!D.meta.live) { msg.textContent = "Live classification is available when you run the dashboard locally with the demo server (see the Method tab)."; go.disabled = true; $("#liveText", p).disabled = true; return; }
+  msg.textContent = "Runs the saved model on this computer through the local demo server.";
+  go.addEventListener("click", async () => {
+    const t = $("#liveText", p).value.trim(); if (!t) { out.textContent = "Paste some text first."; return; }
+    out.textContent = "Classifying…"; go.disabled = true;
+    try { const r = await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: t }) }); if (!r.ok) throw new Error("HTTP " + r.status); const j = await r.json();
+      out.innerHTML = `Model says <span class="pill ${j.label === "FAKE" ? "bad" : "good"}">${j.label}</span> P(fake) = <b>${j.p_fake.toFixed(2)}</b>. It recognises source style, so treat this as a style check, not a fact check.`; }
+    catch (e) { out.innerHTML = `The demo server is not running. Start it with <code>.venv\\Scripts\\python.exe scripts\\serve_dashboard.py</code> and open http://localhost:8765.`; }
+    go.disabled = false;
+  });
+};
+
+/* ---------- Method ---------- */
+renderers.method = p => {
+  const steps = D.method.steps.map(s => `<li><div><b>${esc(s[0])}</b><br><span class="muted">${esc(s[1])}</span></div></li>`).join("");
+  p.innerHTML = `<h2>Method and how to reproduce</h2>
+    <div class="grid g2" style="margin-top:12px">
+      <div class="card"><h3>Pipeline</h3><ol class="steps">${steps}</ol></div>
+      <div class="card"><h3>Model</h3><table><tbody>${D.method.model.map(r => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`).join("")}</tbody></table>
+        <h3 style="margin-top:14px">Reproduce</h3><pre class="cmd">${esc(D.method.reproduce.join("\n"))}</pre></div>
+    </div>
+    <div class="card" style="margin-top:14px"><h3>Limitations</h3><ul class="clean">${D.method.limits.map(l => `<li>${esc(l)}</li>`).join("")}</ul></div>
+    <div class="card" style="margin-top:14px"><h3>Files</h3><table><tbody>${D.method.files.map(f => `<tr><td class="mono">${esc(f[0])}</td><td>${esc(f[1])}</td></tr>`).join("")}</tbody></table></div>`;
+};
+
+/* ---------- shell: tabs, theme, routing ---------- */
+const tabsEl = $("#tabs"), done = {};
+tabsDef.forEach(([id, label]) => { const b = document.createElement("button"); b.type = "button"; b.role = "tab"; b.id = "t-" + id; b.textContent = label; b.setAttribute("aria-selected", "false"); b.addEventListener("click", () => show(id)); tabsEl.appendChild(b); });
+function show(id) {
+  if (!renderers[id]) id = "overview";
+  tabsDef.forEach(([t]) => { $("#p-" + t).hidden = t !== id; $("#t-" + t).setAttribute("aria-selected", String(t === id)); });
+  if (!done[id]) { try { renderers[id]($("#p-" + id)); } catch (e) { $("#p-" + id).innerHTML = `<div class="callout bad">This section could not be drawn: ${esc(e.message)}</div>`; } done[id] = true; }
+  try { history.replaceState(null, "", "#" + id); } catch (e) { }
+}
+window.addEventListener("hashchange", () => show(location.hash.slice(1)));
+$("#chipRuns").textContent = `XLM-R ${D.meta.xlmr_runs}/${D.meta.xlmr_expected} · LoRA ${D.meta.lora_runs}/${D.meta.lora_expected} runs`;
+$("#chipDate").textContent = D.meta.generated; $("#built").textContent = D.meta.generated;
+if (D.meta.lora_runs < D.meta.lora_expected) { $("#chipRuns").classList.add("warn"); }
+let mode = "system"; try { mode = localStorage.getItem("fna-theme") || "system"; } catch (e) { }
+function applyTheme() { const r = document.documentElement; if (mode === "system") r.removeAttribute("data-theme"); else r.setAttribute("data-theme", mode); $("#themeBtn").textContent = "Theme: " + mode; $("#themeBtn").setAttribute("aria-pressed", String(mode !== "system")); }
+$("#themeBtn").addEventListener("click", () => { mode = mode === "system" ? "dark" : mode === "dark" ? "light" : "system"; try { localStorage.setItem("fna-theme", mode); } catch (e) { } applyTheme(); });
+applyTheme(); show(location.hash.slice(1) || "overview");
+</script>
+
+</body></html>
