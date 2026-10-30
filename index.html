@@ -369,7 +369,7 @@ renderers.demo = p => {
   const msg = $("#liveMsg", p), go = $("#liveGo", p), out = $("#liveOut", p);
   const remote = !D.meta.live && D.meta.demo_url;
   if (!D.meta.live && !remote) { msg.textContent = "Live classification is available when you run the dashboard locally with the demo server (see the Method tab)."; go.disabled = true; $("#liveText", p).disabled = true; return; }
-  msg.textContent = remote ? "Runs the saved model on a free Hugging Face Space (CPU). The text you paste is sent to that Space, so do not paste private material. If the Space was asleep, the first request can take up to a minute."
+  msg.textContent = remote ? "Runs the saved model on the project owner's computer through a temporary tunnel, so it only works while that computer is on. The text you paste is sent there, so do not paste private material."
     : "Runs the saved model on this computer through the local demo server.";
   const endpoint = remote ? D.meta.demo_url.replace(/\/+$/, "") + "/api/predict" : "/api/predict";
   go.addEventListener("click", async () => {
@@ -378,7 +378,7 @@ renderers.demo = p => {
     try { const r = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: t }) }); if (r.status === 429) throw new Error("rate"); if (!r.ok) throw new Error("HTTP " + r.status); const j = await r.json();
       out.innerHTML = `Model says <span class="pill ${j.label === "FAKE" ? "bad" : "good"}">${j.label}</span> P(fake) = <b>${j.p_fake.toFixed(2)}</b>. It recognises source style, so treat this as a style check, not a fact check.`; }
     catch (e) { out.innerHTML = e.message === "rate" ? "Too many requests from this connection. Wait a minute and try again."
-      : remote ? "The demo Space did not answer. It may be waking up: try again in a minute."
+      : remote ? "The demo is offline right now. It runs on the project owner's computer and is only switched on during demos."
       : `The demo server is not running. Start it with <code>.venv\\Scripts\\python.exe scripts\\serve_dashboard.py</code> and open http://localhost:8765.`; }
     go.disabled = false;
   });
